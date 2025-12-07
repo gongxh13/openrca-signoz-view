@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-将 OpenRCA metric 和 trace 数据导入到 SigNoz
+将 OpenRCA metric、trace 和 log 数据导入到 SigNoz
 使用 CSV 中的时间戳作为上报数据的时间
-顺序：先导入 metric，再导入 trace
+顺序：先导入 log，再导入 metric，最后导入 trace
 """
 
 import csv
@@ -15,6 +15,18 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+
+# 配置日志（在导入其他模块之前）
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Log 相关的导入（参考 test.py）
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry._logs._internal import LogRecord
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+from opentelemetry._logs import SeverityNumber
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.trace import SpanContext, TraceFlags, Status, StatusCode
 from opentelemetry.util.types import AttributeValue
@@ -34,7 +46,7 @@ from tqdm import tqdm
 import logging
 import traceback
 
-# 配置日志
+# 配置日志（需要在导入其他模块之前配置）
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -101,6 +113,10 @@ class ExporterManager:
         self.config = config
         self._trace_exporter: Optional[OTLPSpanExporter] = None
         self._metric_exporter: Optional[OTLPMetricExporter] = None
+        self._log_exporter: Optional[OTLPLogExporter] = None
+        self._logger_provider: Optional[LoggerProvider] = None
+        self._logger_providers: Dict[str, LoggerProvider] = {}  # 存储不同 resource 的 LoggerProvider
+        self._loggers: Dict[str, any] = {}  # 存储不同 service 的 logger
     
     def _normalize_endpoint(self, endpoint: str) -> str:
         """规范化 endpoint URL"""
@@ -135,6 +151,60 @@ class ExporterManager:
             )
         return self._metric_exporter
     
+    def get_log_exporter(self) -> OTLPLogExporter:
+        """获取或创建 Log Exporter"""
+        if self._log_exporter is None:
+            self._log_exporter = self._create_exporter(
+                OTLPLogExporter,
+                self.config.signoz_endpoint
+            )
+        return self._log_exporter
+    
+    def get_logger_provider(self, resource: Optional[Resource] = None) -> LoggerProvider:
+        """获取或创建 LoggerProvider（支持自定义 resource）"""
+        # 如果没有指定 resource，使用默认的
+        if resource is None:
+            if self._logger_provider is None:
+                # 创建默认 resource
+                default_resource = Resource.create({
+                    "service.name": self.config.service_name,
+                    "service.version": Config.DEFAULT_SERVICE_VERSION,
+                })
+                self._logger_provider = LoggerProvider(resource=default_resource)
+                
+                # 创建 exporter 和 processor
+                exporter = self.get_log_exporter()
+                processor = BatchLogRecordProcessor(exporter)
+                self._logger_provider.add_log_record_processor(processor)
+            
+            return self._logger_provider
+        else:
+            # 为不同的 resource 创建不同的 LoggerProvider
+            # 使用 resource 的 attributes 作为 key
+            resource_key = str(sorted(resource.attributes.items()))
+            if resource_key not in self._logger_providers:
+                logger_provider = LoggerProvider(resource=resource)
+                exporter = self.get_log_exporter()
+                processor = BatchLogRecordProcessor(exporter)
+                logger_provider.add_log_record_processor(processor)
+                self._logger_providers[resource_key] = logger_provider
+            return self._logger_providers[resource_key]
+    
+    def get_logger(self, service_name: str, resource: Optional[Resource] = None) -> any:
+        """获取指定 service 的 logger（支持自定义 resource）"""
+        # 使用 (service_name, resource_key) 作为组合 key
+        if resource is None:
+            resource_key = "default"
+        else:
+            resource_key = str(sorted(resource.attributes.items()))
+        
+        cache_key = f"{service_name}:{resource_key}"
+        if cache_key not in self._loggers:
+            logger_provider = self.get_logger_provider(resource)
+            # 使用 service_name 作为 logger name
+            self._loggers[cache_key] = logger_provider.get_logger(service_name)
+        return self._loggers[cache_key]
+    
     def shutdown_all(self):
         """关闭所有 exporters"""
         if self._trace_exporter:
@@ -152,6 +222,31 @@ class ExporterManager:
                 logger.info("Metric Exporter 已关闭")
             except Exception as e:
                 logger.warning(f"关闭 Metric Exporter 时出错: {e}")
+        
+        # 关闭所有 LoggerProvider
+        if self._logger_provider:
+            try:
+                time.sleep(self.config.exporter_wait_time)
+                self._logger_provider.shutdown()
+                logger.info("Log LoggerProvider 已关闭")
+            except Exception as e:
+                logger.warning(f"关闭 Log LoggerProvider 时出错: {e}")
+        
+        for resource_key, logger_provider in self._logger_providers.items():
+            try:
+                time.sleep(self.config.exporter_wait_time)
+                logger_provider.shutdown()
+                logger.info(f"Log LoggerProvider ({resource_key}) 已关闭")
+            except Exception as e:
+                logger.warning(f"关闭 Log LoggerProvider ({resource_key}) 时出错: {e}")
+        
+        if self._log_exporter and not self._logger_provider and not self._logger_providers:
+            try:
+                time.sleep(self.config.exporter_wait_time)
+                self._log_exporter.shutdown()
+                logger.info("Log Exporter 已关闭")
+            except Exception as e:
+                logger.warning(f"关闭 Log Exporter 时出错: {e}")
 
 
 # ============================================================================
@@ -1134,6 +1229,144 @@ def process_file_streaming(
         return 0
 
 
+def process_log_file_streaming(
+    file_path: str,
+    exporter_manager: ExporterManager,
+    batch_size: int,
+    time_range_info: Optional[Dict] = None,
+    time_offset_ms: int = 0,
+    show_progress: bool = True,
+    resource_manager: Optional[ResourceManager] = None
+) -> int:
+    """流式处理 log 文件，边读边发送（使用 LoggerProvider 方式）
+    
+    Args:
+        file_path: log_service.csv 文件路径
+        exporter_manager: ExporterManager 实例
+        batch_size: 批处理大小（用于进度显示，实际由 BatchLogRecordProcessor 控制）
+        time_range_info: 时间范围信息字典（可选）
+        time_offset_ms: 时间偏移量（毫秒）
+        show_progress: 是否显示进度条
+        resource_manager: Resource 管理器
+    """
+    if resource_manager is None:
+        resource_manager = _resource_manager
+    
+    count = 0
+    file_count = 0
+    min_timestamp = None
+    max_timestamp = None
+    
+    try:
+        # 统计文件总行数用于进度条
+        total_lines = count_file_lines(file_path) if show_progress else 0
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            
+            # 创建进度条
+            pbar = None
+            if show_progress and total_lines > 0:
+                pbar = tqdm(
+                    total=total_lines,
+                    desc="    处理中",
+                    unit="行",
+                    unit_scale=True,
+                    leave=False,
+                    ncols=100,
+                    mininterval=0.5,
+                    bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
+                )
+            
+            try:
+                for row in reader:
+                    try:
+                        # 解析时间戳（应用时间偏移）
+                        timestamp_s = int(float(row.get('timestamp', 0)))
+                        if timestamp_s <= 0:
+                            if pbar:
+                                pbar.update(1)
+                            continue
+                        
+                        timestamp_ms = timestamp_s * 1000
+                        timestamp_ns = (timestamp_ms + time_offset_ms) * 1_000_000
+                        
+                        # 跟踪时间范围
+                        if time_range_info is not None:
+                            adjusted_timestamp_ms = timestamp_ms + time_offset_ms
+                            if min_timestamp is None or adjusted_timestamp_ms < min_timestamp:
+                                min_timestamp = adjusted_timestamp_ms
+                            if max_timestamp is None or adjusted_timestamp_ms > max_timestamp:
+                                max_timestamp = adjusted_timestamp_ms
+                        
+                        # 获取 log 信息
+                        cmdb_id = row.get('cmdb_id', 'unknown')
+                        log_name = row.get('log_name', '')
+                        log_value = row.get('value', '')
+                        log_id = row.get('log_id', '')
+                        
+                        # 获取对应 service 的 resource
+                        service_resource = resource_manager.get_resource(cmdb_id)
+                        
+                        # 获取对应 service 的 logger（使用对应的 resource）
+                        log_logger = exporter_manager.get_logger(cmdb_id, service_resource)
+                        
+                        # 创建 LogRecord（参考 test.py，不包含 resource 参数）
+                        log_record = LogRecord(
+                            timestamp=timestamp_ns,
+                            observed_timestamp=time.time_ns(),
+                            trace_id=0,
+                            span_id=0,
+                            trace_flags=None,
+                            severity_text="INFO",
+                            severity_number=SeverityNumber.INFO,
+                            body=log_value,
+                            attributes={
+                                "cmdb_id": cmdb_id,
+                                "log_name": log_name,
+                                "log_id": log_id,
+                            }
+                        )
+                        
+                        # 发送日志
+                        log_logger.emit(log_record)
+                        file_count += 1
+                        count += 1
+                        
+                        # 更新进度条
+                        if pbar:
+                            pbar.update(1)
+                        
+                    except Exception as e:
+                        if pbar:
+                            pbar.write(f"    ⚠️  处理行时出错: {e}")
+                        logger.warning(f"处理 log 行时出错: {e}")
+                        if pbar:
+                            pbar.update(1)
+                        continue
+                        
+            finally:
+                if pbar:
+                    pbar.close()
+        
+        # 更新全局时间范围信息
+        if time_range_info is not None:
+            if min_timestamp is not None:
+                if time_range_info.get('min') is None or min_timestamp < time_range_info['min']:
+                    time_range_info['min'] = min_timestamp
+            if max_timestamp is not None:
+                if time_range_info.get('max') is None or max_timestamp > time_range_info['max']:
+                    time_range_info['max'] = max_timestamp
+        
+        return file_count
+        
+    except Exception as e:
+        if show_progress:
+            print(f"    ❌ 处理文件时出错: {e}")
+        logger.exception("处理文件时出错")
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description='将 OpenRCA metric 和 trace 数据导入到 SigNoz')
     parser.add_argument(
@@ -1189,7 +1422,7 @@ def main():
     exporter_manager = ExporterManager(config)
     
     print("=" * 60)
-    print("🚀 OpenRCA Metric & Trace 数据导入工具")
+    print("🚀 OpenRCA Metric, Trace & Log 数据导入工具")
     print("=" * 60)
     print(f"  📍 SigNoz 端点: {args.signoz_endpoint}")
     print(f"  🏷️  服务名称: {args.service_name} (仅用于exporter初始化)")
@@ -1264,9 +1497,61 @@ def main():
     start_time = time.time()
     time_range_info = {'min': None, 'max': None}  # 跟踪时间范围
     
-    # ========== 第一步：导入 Metric 数据 ==========
+    # ========== 第一步：导入 Log 数据 ==========
     print("=" * 60)
-    print("📊 第一步：导入 Metric 数据")
+    print("📝 第一步：导入 Log 数据")
+    print("=" * 60)
+    print()
+    
+    # 设置 Log LoggerProvider
+    print("🔧 初始化 OpenTelemetry Log LoggerProvider...")
+    try:
+        logger_provider = exporter_manager.get_logger_provider()
+        print("✅ Log LoggerProvider 初始化完成\n")
+    except Exception as e:
+        print(f"❌ Log LoggerProvider 初始化失败: {e}")
+        logger.exception("Log LoggerProvider 初始化失败")
+        return
+    
+    # 查找 log 文件
+    log_files = sorted(glob.glob(str(data_dir_path / "**/log_service.csv"), recursive=True))
+    
+    total_logs = 0
+    
+    if not log_files:
+        print(f"⚠️  未找到 log_service.csv 文件在目录: {data_dir}")
+        print(f"   请检查:")
+        print(f"   1. 目录结构是否正确（应包含 log/log_service.csv 文件）")
+        print(f"   2. --source-date 参数是否与文件夹名称匹配（例如: 2021-03-04 对应 2021_03_04 文件夹）")
+        print()
+    else:
+        print(f"📋 找到 {len(log_files)} 个 log 文件\n")
+        
+        # 流式处理每个文件
+        with tqdm(total=len(log_files), desc="📝 处理 log 文件", unit="文件", ncols=100) as file_pbar:
+            for file_idx, log_file in enumerate(log_files, 1):
+                file_name = Path(log_file).name
+                file_pbar.set_description(f"📄 [{file_idx}/{len(log_files)}] {file_name}")
+                
+                file_count = process_log_file_streaming(
+                    log_file,
+                    exporter_manager,
+                    config.batch_size,
+                    time_range_info=time_range_info,
+                    time_offset_ms=config.time_offset_ms,
+                    show_progress=True,
+                    resource_manager=resource_manager
+                )
+                
+                total_logs += file_count
+                file_pbar.update(1)
+                file_pbar.set_postfix({"logs": f"{file_count:,}", "总计": f"{total_logs:,}"})
+        
+        print()  # 空行分隔
+    
+    # ========== 第二步：导入 Metric 数据 ==========
+    print("=" * 60)
+    print("📊 第二步：导入 Metric 数据")
     print("=" * 60)
     print()
     
@@ -1346,9 +1631,9 @@ def main():
     
     # 等待 metric 数据发送完成（将在最后统一关闭所有 exporters）
     
-    # ========== 第二步：导入 Trace 数据 ==========
+    # ========== 第三步：导入 Trace 数据 ==========
     print("=" * 60)
-    print("🔍 第二步：导入 Trace 数据")
+    print("🔍 第三步：导入 Trace 数据")
     print("=" * 60)
     print()
     
@@ -1408,7 +1693,7 @@ def main():
     
     print("💡 提示: 检查 SigNoz Collector 日志:")
     print(f"  docker logs <signoz-otel-collector-container> --tail 50")
-    print("  如果看到 metric 和 trace 相关的日志，说明数据已成功接收")
+    print("  如果看到 metric、trace 和 log 相关的日志，说明数据已成功接收")
     
     elapsed_time = time.time() - start_time
     print()
@@ -1418,11 +1703,15 @@ def main():
         print(f"  📊 Metric 记录数: {total_metrics:,}")
     if trace_files:
         print(f"  🔍 Trace spans 数: {total_spans:,}")
+    if log_files:
+        print(f"  📝 Log 记录数: {total_logs:,}")
     print(f"  ⏱️  总耗时: {elapsed_time:.2f} 秒")
     if total_metrics > 0:
         print(f"  📈 Metric 平均速度: {total_metrics / elapsed_time:.0f} metrics/秒")
     if trace_files and total_spans > 0:
         print(f"  📈 Trace 平均速度: {total_spans / elapsed_time:.0f} spans/秒")
+    if log_files and total_logs > 0:
+        print(f"  📈 Log 平均速度: {total_logs / elapsed_time:.0f} logs/秒")
     
     # 清理资源
     resource_manager.clear_cache()
