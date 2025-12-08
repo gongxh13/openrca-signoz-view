@@ -18,7 +18,7 @@
 
 ## 前置要求
 
-1. **Python 3.8+**
+1. **Python 3.9+**（由于 `grpcio` 依赖要求）
 2. **已部署的 SigNoz 实例**（本地 Docker 部署）
 3. **OpenRCA 数据集**（位于 `datasets/OpenRCA/Bank/telemetry/` 目录）
 4. **SigNoz 配置文件**（位于 `config/signoz/` 目录，可直接使用）
@@ -104,7 +104,7 @@ conda 用于创建 Python 环境，Poetry 用于管理项目依赖。
 **1. 创建 conda 环境**
 
 ```bash
-# 创建新环境（Python 3.8+）
+# 创建新环境（Python 3.9+）
 conda create -n openrca-signoz python=3.9
 
 # 激活环境
