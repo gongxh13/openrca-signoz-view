@@ -16,11 +16,6 @@ from opentelemetry.sdk.trace.export import SpanExportResult
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 
-# 配置日志（在导入其他模块之前）
-import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
 # Log 相关的导入（参考 test.py）
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry._logs._internal import LogRecord
@@ -46,8 +41,8 @@ from tqdm import tqdm
 import logging
 import traceback
 
-# 配置日志（需要在导入其他模块之前配置）
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 配置日志
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -211,7 +206,6 @@ class ExporterManager:
             try:
                 time.sleep(self.config.exporter_wait_time)
                 self._trace_exporter.shutdown()
-                logger.info("Trace Exporter 已关闭")
             except Exception as e:
                 logger.warning(f"关闭 Trace Exporter 时出错: {e}")
         
@@ -219,7 +213,6 @@ class ExporterManager:
             try:
                 time.sleep(self.config.exporter_wait_time)
                 self._metric_exporter.shutdown()
-                logger.info("Metric Exporter 已关闭")
             except Exception as e:
                 logger.warning(f"关闭 Metric Exporter 时出错: {e}")
         
@@ -228,7 +221,6 @@ class ExporterManager:
             try:
                 time.sleep(self.config.exporter_wait_time)
                 self._logger_provider.shutdown()
-                logger.info("Log LoggerProvider 已关闭")
             except Exception as e:
                 logger.warning(f"关闭 Log LoggerProvider 时出错: {e}")
         
@@ -236,7 +228,6 @@ class ExporterManager:
             try:
                 time.sleep(self.config.exporter_wait_time)
                 logger_provider.shutdown()
-                logger.info(f"Log LoggerProvider ({resource_key}) 已关闭")
             except Exception as e:
                 logger.warning(f"关闭 Log LoggerProvider ({resource_key}) 时出错: {e}")
         
@@ -244,7 +235,6 @@ class ExporterManager:
             try:
                 time.sleep(self.config.exporter_wait_time)
                 self._log_exporter.shutdown()
-                logger.info("Log Exporter 已关闭")
             except Exception as e:
                 logger.warning(f"关闭 Log Exporter 时出错: {e}")
 
@@ -463,7 +453,7 @@ def create_span_data_from_row(
         return span
             
     except Exception as e:
-        print(f"创建 span 时出错: {e}, 行数据: {row}")
+        logger.warning(f"创建 span 时出错: {e}")
         return None
 
 
@@ -722,18 +712,14 @@ def process_metric_app_file(
                                     metrics_data = MetricsData(resource_metrics=resource_metrics_list)
                                     result = exporter.export(metrics_data)
                                     if result != MetricExportResult.SUCCESS:
-                                        if pbar:
-                                            pbar.write(f"    ⚠️  警告: 批次导出返回: {result}")
+                                        logger.warning(f"批次导出返回: {result}")
                                 except Exception as e:
-                                    if pbar:
-                                        pbar.write(f"    ❌ 错误: 导出批次时出错: {e}")
                                     logger.exception("导出批次时出错")
                             
                             batch_rows = []
                             
                     except Exception as e:
-                        if pbar:
-                            pbar.write(f"    ⚠️  处理行时出错: {e}")
+                        logger.warning(f"处理行时出错: {e}")
                         continue
                         
             finally:
@@ -748,18 +734,13 @@ def process_metric_app_file(
                     metrics_data = MetricsData(resource_metrics=resource_metrics_list)
                     result = exporter.export(metrics_data)
                     if result != MetricExportResult.SUCCESS:
-                        if show_progress:
-                            print(f"    ⚠️  警告: 最后批次导出返回: {result}")
+                        logger.warning(f"最后批次导出返回: {result}")
                 except Exception as e:
-                    if show_progress:
-                        print(f"    ❌ 错误: 导出最后批次时出错: {e}")
                     logger.exception("导出最后批次时出错")
         
         return count
         
     except Exception as e:
-        if show_progress:
-            print(f"    ❌ 处理文件时出错: {e}")
         logger.exception("处理文件时出错")
         return 0
 
@@ -997,11 +978,8 @@ def process_metric_container_file(
                                                     total_data_points += len(metric.data.data_points)
                                     
                                     if result != MetricExportResult.SUCCESS:
-                                        if pbar:
-                                            pbar.write(f"    ⚠️  警告: 批次 #{total_batches_exported} 导出返回: {result}")
+                                        logger.warning(f"批次 #{total_batches_exported} 导出返回: {result}")
                                 except Exception as e:
-                                    if pbar:
-                                        pbar.write(f"    ❌ 错误: 批次 #{total_batches_exported + 1} 导出时出错: {e}")
                                     logger.exception("导出批次时出错")
                             
                             batch_rows = []
@@ -1032,34 +1010,13 @@ def process_metric_container_file(
                                     total_data_points += len(metric.data.data_points)
                     
                     if result != MetricExportResult.SUCCESS:
-                        if show_progress:
-                            print(f"    ⚠️  警告: 最后批次导出返回: {result}")
+                        logger.warning(f"最后批次导出返回: {result}")
                 except Exception as e:
-                    if show_progress:
-                        print(f"    ❌ 错误: 导出最后批次时出错: {e}")
                     logger.exception("导出最后批次时出错")
-        
-        # 打印统计信息
-        if show_progress:
-            print()
-            print("=" * 60)
-            print("📊 Container Metric 统计信息:")
-            print("=" * 60)
-            print(f"  📄 读取的CSV行数: {count:,}")
-            print(f"  📊 创建的Metric数据点总数: {total_data_points:,}")
-            print(f"  📦 创建的ResourceMetrics总数: {total_resource_metrics:,}")
-            print(f"  📤 导出的批次总数: {total_batches_exported:,}")
-            if total_batches_exported > 0:
-                avg_batch_size = total_resource_metrics / total_batches_exported
-                print(f"  📈 平均每批次ResourceMetrics数: {avg_batch_size:.1f}")
-            print("=" * 60)
-            print()
         
         return count
         
     except Exception as e:
-        if show_progress:
-            print(f"    ❌ 处理文件时出错: {e}")
         logger.exception("处理文件时出错")
         return 0
 
@@ -1187,11 +1144,8 @@ def process_file_streaming(
                             try:
                                 result = exporter.export(batch)
                                 if result != SpanExportResult.SUCCESS:
-                                    if pbar:
-                                        pbar.write(f"    ⚠️  警告: 批次导出返回: {result}")
+                                    logger.warning(f"批次导出返回: {result}")
                             except Exception as e:
-                                if pbar:
-                                    pbar.write(f"    ❌ 错误: 导出批次时出错: {e}")
                                 logger.exception("导出批次时出错")
                             finally:
                                 batch = []
@@ -1201,11 +1155,8 @@ def process_file_streaming(
                     try:
                         result = exporter.export(batch)
                         if result != SpanExportResult.SUCCESS:
-                            if pbar:
-                                pbar.write(f"    ⚠️  警告: 最后批次导出返回: {result}")
+                            logger.warning(f"最后批次导出返回: {result}")
                     except Exception as e:
-                        if pbar:
-                            pbar.write(f"    ❌ 错误: 导出最后批次时出错: {e}")
                         logger.exception("导出最后批次时出错")
             finally:
                 if pbar:
@@ -1223,8 +1174,6 @@ def process_file_streaming(
         return file_count
         
     except Exception as e:
-        if show_progress:
-            print(f"    ❌ 处理文件时出错: {e}")
         logger.exception("处理文件时出错")
         return 0
 
@@ -1338,8 +1287,6 @@ def process_log_file_streaming(
                             pbar.update(1)
                         
                     except Exception as e:
-                        if pbar:
-                            pbar.write(f"    ⚠️  处理行时出错: {e}")
                         logger.warning(f"处理 log 行时出错: {e}")
                         if pbar:
                             pbar.update(1)
@@ -1361,8 +1308,6 @@ def process_log_file_streaming(
         return file_count
         
     except Exception as e:
-        if show_progress:
-            print(f"    ❌ 处理文件时出错: {e}")
         logger.exception("处理文件时出错")
         return 0
 
@@ -1425,9 +1370,7 @@ def main():
     print("🚀 OpenRCA Metric, Trace & Log 数据导入工具")
     print("=" * 60)
     print(f"  📍 SigNoz 端点: {args.signoz_endpoint}")
-    print(f"  🏷️  服务名称: {args.service_name} (仅用于exporter初始化)")
     print(f"  📦 批处理大小: {args.batch_size}")
-    print(f"  💡 Resource 说明: 将根据数据文件中的 tc/cmdb_id 动态创建")
     print("=" * 60)
     print()
     
@@ -1437,11 +1380,9 @@ def main():
         # 将 YYYY-MM-DD 格式转换为 YYYY_MM_DD 格式（文件夹命名格式）
         date_folder = args.source_date.replace('-', '_')
         data_dir = f'datasets/OpenRCA/Bank/telemetry/{date_folder}'
-        print(f"  📁 数据目录: {data_dir} (根据 --source-date 自动构建)")
     else:
         # 使用指定的 data-dir
         data_dir = args.data_dir
-        print(f"  📁 数据目录: {data_dir}")
     
     # 计算时间偏移量
     try:
@@ -1471,12 +1412,6 @@ def main():
         time_offset_ms = target_timestamp_ms - source_timestamp_ms
         config.time_offset_ms = time_offset_ms
         
-        print(f"  ⏰ 时间映射:")
-        print(f"     源日期: {args.source_date} 00:00:00 UTC")
-        print(f"     目标日期: {args.target_date} 00:00:00 UTC")
-        print(f"     时间偏移: {time_offset_ms / (24*60*60*1000):.1f} 天")
-        print()
-        
     except ValueError as e:
         print(f"❌ 日期格式错误: {e}")
         print("   日期格式应为: YYYY-MM-DD (例如: 2021-03-04)")
@@ -1504,10 +1439,8 @@ def main():
     print()
     
     # 设置 Log LoggerProvider
-    print("🔧 初始化 OpenTelemetry Log LoggerProvider...")
     try:
         logger_provider = exporter_manager.get_logger_provider()
-        print("✅ Log LoggerProvider 初始化完成\n")
     except Exception as e:
         print(f"❌ Log LoggerProvider 初始化失败: {e}")
         logger.exception("Log LoggerProvider 初始化失败")
@@ -1519,11 +1452,7 @@ def main():
     total_logs = 0
     
     if not log_files:
-        print(f"⚠️  未找到 log_service.csv 文件在目录: {data_dir}")
-        print(f"   请检查:")
-        print(f"   1. 目录结构是否正确（应包含 log/log_service.csv 文件）")
-        print(f"   2. --source-date 参数是否与文件夹名称匹配（例如: 2021-03-04 对应 2021_03_04 文件夹）")
-        print()
+        print(f"⚠️  未找到 log_service.csv 文件")
     else:
         print(f"📋 找到 {len(log_files)} 个 log 文件\n")
         
@@ -1556,10 +1485,8 @@ def main():
     print()
     
     # 设置 Metric Exporter
-    print("🔧 初始化 OpenTelemetry Metric Exporter...")
     try:
         metric_exporter = exporter_manager.get_metric_exporter()
-        print("✅ Metric Exporter 初始化完成\n")
     except Exception as e:
         print(f"❌ Metric Exporter 初始化失败: {e}")
         logger.exception("Metric Exporter 初始化失败")
@@ -1598,15 +1525,7 @@ def main():
     
     # 处理 metric_container.csv 文件
     if metric_container_files:
-        print(f"📋 找到 {len(metric_container_files)} 个 metric_container.csv 文件")
-        print("   💡 使用按大类分组metric模式: container metric将按大类分组为6个metric：")
-        print("      - container_mysql_metric (MySQL相关)")
-        print("      - container_oslinux_metric (操作系统Linux相关)")
-        print("      - container_redis_metric (Redis相关)")
-        print("      - container_container_metric (Docker容器相关)")
-        print("      - container_tomcat_metric (Tomcat相关)")
-        print("      - container_jvm_metric (JVM相关)")
-        print("      这样可以大大减少metric数量（从349个减少到6个），便于在SigNoz中管理和查询\n")
+        print(f"📋 找到 {len(metric_container_files)} 个 metric_container.csv 文件\n")
         with tqdm(total=len(metric_container_files), desc="📊 处理 metric_container 文件", unit="文件", ncols=100) as file_pbar:
             for file_idx, metric_file in enumerate(metric_container_files, 1):
                 file_name = Path(metric_file).name
@@ -1638,10 +1557,8 @@ def main():
     print()
     
     # 设置 Trace Exporter
-    print("🔧 初始化 OpenTelemetry Trace Exporter...")
     try:
         trace_exporter = exporter_manager.get_trace_exporter()
-        print("✅ Trace Exporter 初始化完成\n")
     except Exception as e:
         print(f"❌ Trace Exporter 初始化失败: {e}")
         logger.exception("Trace Exporter 初始化失败")
@@ -1651,11 +1568,7 @@ def main():
     trace_files = sorted(glob.glob(str(data_dir_path / "**/trace_span.csv"), recursive=True))
     
     if not trace_files:
-        print(f"⚠️  未找到 trace_span.csv 文件在目录: {data_dir}")
-        print(f"   请检查:")
-        print(f"   1. 目录结构是否正确（应包含 trace/trace_span.csv 文件）")
-        print(f"   2. --source-date 参数是否与文件夹名称匹配（例如: 2021-03-04 对应 2021_03_04 文件夹）")
-        print()
+        print(f"⚠️  未找到 trace_span.csv 文件")
     else:
         print(f"📋 找到 {len(trace_files)} 个 trace 文件\n")
         
@@ -1687,13 +1600,7 @@ def main():
         # 确保所有 trace 数据都发送完成（将在最后统一关闭所有 exporters）
     
     # 统一关闭所有 exporters
-    print("⏳ 等待所有数据发送完成...")
     exporter_manager.shutdown_all()
-    print()
-    
-    print("💡 提示: 检查 SigNoz Collector 日志:")
-    print(f"  docker logs <signoz-otel-collector-container> --tail 50")
-    print("  如果看到 metric、trace 和 log 相关的日志，说明数据已成功接收")
     
     elapsed_time = time.time() - start_time
     print()
@@ -1728,37 +1635,6 @@ def main():
         print("📅 数据时间范围:")
         print(f"  ⏰ 最早时间 (UTC): {min_dt_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
         print(f"  ⏰ 最晚时间 (UTC): {max_dt_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-        if min_dt_local != min_dt_utc:
-            print(f"  ⏰ 最早时间 (本地): {min_dt_local.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"  ⏰ 最晚时间 (本地): {max_dt_local.strftime('%Y-%m-%d %H:%M:%S')}")
-        print()
-        print("⚠️  重要提示: SigNoz 使用 UTC 时间，请按以下步骤设置:")
-        # 计算开始和结束的日期（UTC），包含前后各一天以确保覆盖
-        start_date = min_dt_utc.strftime('%Y-%m-%d')
-        end_date = max_dt_utc.strftime('%Y-%m-%d')
-        
-        # 如果数据跨越多天，使用更宽的时间范围
-        start_date_obj = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
-        # 扩展一天以确保覆盖
-        extended_start = (start_date_obj - timedelta(days=1)).strftime('%Y-%m-%d')
-        extended_end = (end_date_obj + timedelta(days=1)).strftime('%Y-%m-%d')
-        
-        print(f"  1. 点击 SigNoz 右上角的时间选择器")
-        print(f"  2. 选择 'Custom Time Range' 或 '自定义时间范围'")
-        print(f"  3. 设置开始时间: {extended_start} 00:00:00")
-        print(f"  4. 设置结束时间: {extended_end} 23:59:59")
-        print(f"  5. 时区选择: UTC (重要！)")
-        print(f"  6. 点击应用")
-        print()
-        print(f"  💡 数据实际范围: {start_date} ~ {end_date} (UTC)")
-        print(f"  💡 建议查询范围: {extended_start} ~ {extended_end} (UTC)")
-        print()
-        print("🔍 如果还是看不到数据，请检查:")
-        print(f"  • 服务名称过滤器: 选择 '{args.service_name}' 或清除所有过滤器")
-        print("  • 等待 2-5 分钟让数据索引完成")
-        print("  • 刷新浏览器页面")
-        print("  • 查看 SigNoz 日志: docker logs <signoz-container>")
     
     print("=" * 60)
 
