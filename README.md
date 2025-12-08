@@ -23,10 +23,160 @@
 3. **OpenRCA 数据集**（位于 `datasets/OpenRCA/Bank/telemetry/` 目录）
 4. **SigNoz 配置文件**（位于 `config/signoz/` 目录，可直接使用）
 
-## 安装
+## 环境准备
+
+项目支持使用 **Poetry**、**uv** 或 **conda** 进行依赖管理。请选择其中一种方式：
+
+### 方式一：使用 Poetry（推荐）
+
+Poetry 是一个现代化的 Python 依赖管理工具。
+
+**1. 安装 Poetry**
 
 ```bash
-pip install -r requirements.txt
+# macOS/Linux
+curl -sSL https://install.python-poetry.org | python3 -
+
+# 或使用 pip
+pip install poetry
+```
+
+**2. 安装项目依赖**
+
+```bash
+# 安装依赖
+poetry install
+
+# 运行脚本（在 Poetry 虚拟环境中）
+poetry run python main.py --source-date 2021-03-04 --target-date 2024-12-19
+```
+
+**3. 激活虚拟环境（可选）**
+
+```bash
+# 激活 Poetry 虚拟环境
+poetry shell
+
+# 然后可以直接运行
+python main.py --source-date 2021-03-04 --target-date 2024-12-19
+```
+
+### 方式二：使用 uv
+
+uv 是一个极快的 Python 包管理器和解析器。
+
+**1. 安装 uv**
+
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 或使用 pip
+pip install uv
+```
+
+**2. 安装项目依赖**
+
+```bash
+# 同步依赖（根据 pyproject.toml）
+uv sync
+
+# 运行脚本
+uv run python main.py --source-date 2021-03-04 --target-date 2024-12-19
+```
+
+**3. 激活虚拟环境（可选）**
+
+```bash
+# 激活虚拟环境
+source .venv/bin/activate  # macOS/Linux
+# 或
+.venv\Scripts\activate  # Windows
+
+# 然后可以直接运行
+python main.py --source-date 2021-03-04 --target-date 2024-12-19
+```
+
+### 方式三：使用 conda + Poetry
+
+conda 用于创建 Python 环境，Poetry 用于管理项目依赖。
+
+**1. 创建 conda 环境**
+
+```bash
+# 创建新环境（Python 3.8+）
+conda create -n openrca-signoz python=3.9
+
+# 激活环境
+conda activate openrca-signoz
+```
+
+**2. 安装 Poetry（如果尚未安装）**
+
+```bash
+pip install poetry
+```
+
+**3. 安装项目依赖**
+
+```bash
+# 使用 Poetry 安装依赖（在 conda 环境中）
+poetry install
+
+# 运行脚本（在 Poetry 虚拟环境中）
+poetry run python main.py --source-date 2021-03-04 --target-date 2024-12-19
+```
+
+**4. 激活虚拟环境（可选）**
+
+```bash
+# 激活 Poetry 虚拟环境
+poetry shell
+
+# 然后可以直接运行
+python main.py --source-date 2021-03-04 --target-date 2024-12-19
+```
+
+### 方式四：使用 venv + Poetry
+
+使用 Python 内置的 venv 创建虚拟环境，Poetry 管理依赖。
+
+**1. 创建虚拟环境**
+
+```bash
+# 创建虚拟环境
+python -m venv venv
+
+# 激活虚拟环境
+source venv/bin/activate  # macOS/Linux
+# 或
+venv\Scripts\activate  # Windows
+```
+
+**2. 安装 Poetry（如果尚未安装）**
+
+```bash
+pip install poetry
+```
+
+**3. 安装项目依赖**
+
+```bash
+# 使用 Poetry 安装依赖
+poetry install
+
+# 运行脚本（在 Poetry 虚拟环境中）
+poetry run python main.py --source-date 2021-03-04 --target-date 2024-12-19
+```
+
+**4. 激活虚拟环境（可选）**
+
+```bash
+# 激活 Poetry 虚拟环境
+poetry shell
+
+# 然后可以直接运行
+python main.py --source-date 2021-03-04 --target-date 2024-12-19
 ```
 
 ## SigNoz 配置

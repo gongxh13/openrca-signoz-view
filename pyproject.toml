@@ -1,0 +1,23 @@
+[project]
+name = "openrca-signoz-view"
+version = "0.1.0"
+description = "将 OpenRCA metric、trace 和 log 数据导入到 SigNoz"
+authors = [
+    {name = "巩旭红", email = "2250244225@qq.com"}
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "tqdm>=4.65.0"
+]
+
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
